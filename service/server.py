@@ -14,6 +14,7 @@ class Git_NewBranch(BaseModel):
     """
     Model to check out a git branch.
     """
+    repo_path : str
     task_type: str 
     task_code: str 
     task_title: str
@@ -31,24 +32,30 @@ class GitTools(str, Enum):
     CHECKOUT = "git_checkout"
     SHOW = "git_show"
     INIT = "git_init"
-    BRANCH = "git_newbranch"
+    BRANCH = "git_branch"
 
 
-def checkout(task_type : str , task_code : str ,task_title : str ) -> str:
+def checkout(repo : git.Repo , task_type : str , task_code : str ,task_title : str ) -> str:
     """
     Check out the specified git branch.
     """
     branch_name = f"{task_type}#{task_code} : {task_title}"
     
-    repo = git.Repo()
     repo.git.checkout(branch_name)
     return f"Checked out branch: {branch_name}"
 
 async def ser(repository: Path | None) -> None:
     '''
     Run the MCP server
+    
     '''
     server = Server("Specific workflow server")
+
+    if repository is not None:
+        try:
+            git.Repo(repository)
+        except git.InvalidGitRepositoryError:
+            return
 
     @server.list_tools()
     async def tool_list() -> list[Tool]:
@@ -68,7 +75,11 @@ async def ser(repository: Path | None) -> None:
         """
         Call the prompt_branch_name tool with the provided parameters.
         """
-        return TextContent(checkout(argument["task_type"], argument["type_code"], argument["task_title"]))
+
+        repo = git.Repo(argument["repo_path"])
+
+        if(tool_name == GitTools.CHECKOUT):
+            return TextContent(checkout(repo , argument["task_type"], argument["type_code"], argument["task_title"]))
 
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):
