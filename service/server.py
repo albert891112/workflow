@@ -43,11 +43,22 @@ class WorkflowTools(str, Enum):
     GET_COMMIT_TITLE = "get_commit_title"
 
 # Get the commit title for the specified task
-def get_commit_title(repo : git.Repo , task_type : str , task_code : str ,task_title : str ) -> str:
+def get_commit_title(task_type : str , task_code : str ,task_title : str ) -> str:
     """
     Get the commit title for the specified task.
     """
-    return f"{task_type}#{task_code} : {task_title}"
+    class Task_Type(str, Enum):
+        FEATURE = "feature"
+        BUGFIX = "bugfix"
+
+    icon = ""
+
+    if task_type == Task_Type.FEATURE:
+        icon = "✨"
+    elif task_type == Task_Type.BUGFIX:
+        icon = "🐛"
+
+    return f"{icon}{task_type}#{task_code} : {task_title}"
 
 #Return Commit Plan Prompt
 def commit_plan(commit_title : str , project_name : str) -> str:
@@ -92,12 +103,6 @@ async def ser(repository: Path | None) -> None:
     '''
     server = Server("Specific workflow server")
 
-    if repository is not None:
-        try:
-            git.Repo(repository)
-        except git.InvalidGitRepositoryError:
-            return
-
     @server.list_tools()
     async def tool_list() -> list[Tool]:
         """
@@ -122,12 +127,10 @@ async def ser(repository: Path | None) -> None:
         Call the prompt_branch_name tool with the provided parameters.
         """
 
-        repo = git.Repo(argument["repo_path"])
-
         if(tool_name == WorkflowTools.GET_COMMIT_TITLE):
-            return TextContent(get_commit_title(argument["task_type"], argument["type_code"], argument["task_title"]))
+            return [TextContent(type="text", text=get_commit_title(argument["task_type"], argument["task_code"], argument["task_title"]))]
         if(tool_name == WorkflowTools.COMMIT_PLAN):
-            return TextContent(commit_plan(argument["commit_title"], argument["project_name"]))
+            return [TextContent(type="text", text=commit_plan(argument["commit_title"], argument["project_name"]))]
 
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):
