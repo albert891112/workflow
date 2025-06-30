@@ -10,16 +10,22 @@ from mcp.types import (
 import git
 from pydantic import BaseModel, Field
 
-class Git_NewBranch(BaseModel):
+class Get_Commit_Title(BaseModel):
     """
-    Model to check out a git branch.
+    Model to get the commit title for a specific task.
     """
-    repo_path : str
-    task_type: str 
-    task_code: str 
+    task_type: str
+    task_code: str
     task_title: str
-    
-class GitTools(str, Enum):
+
+class Commit_Plan(BaseModel):
+    """
+    Model to commit a plan to the git repository.
+    """
+    project_name: str = Field(..., description="Name of the project")
+    commit_title: str = Field(..., description="Title for the commit")
+
+class WorkflowTools(str, Enum):
     STATUS = "git_status"
     DIFF_UNSTAGED = "git_diff_unstaged"
     DIFF_STAGED = "git_diff_staged"
@@ -33,17 +39,52 @@ class GitTools(str, Enum):
     SHOW = "git_show"
     INIT = "git_init"
     BRANCH = "git_branch"
+    COMMIT_PLAN = "commit_plan"
+    GET_COMMIT_TITLE = "get_commit_title"
 
-
-def checkout(repo : git.Repo , task_type : str , task_code : str ,task_title : str ) -> str:
+# Get the commit title for the specified task
+def get_commit_title(repo : git.Repo , task_type : str , task_code : str ,task_title : str ) -> str:
     """
-    Check out the specified git branch.
+    Get the commit title for the specified task.
     """
-    branch_name = f"{task_type}#{task_code} : {task_title}"
-    
-    repo.git.checkout(branch_name)
-    return f"Checked out branch: {branch_name}"
+    return f"{task_type}#{task_code} : {task_title}"
 
+#Return Commit Plan Prompt
+def commit_plan(commit_title : str , project_name : str) -> str:
+    """
+    Commit the plan to the git repository.
+    """
+    commit_plan = f'''You are an expert developer assistant. Your task is to help the user commit changes to a local repository by following these steps:
+
+                    1. **Get the local repository path:**
+                    - Check the gist named `project_repo_path.json` for a mapping from the supplied `project_name` to its local path.
+                    - If the mapping exists, use the path. If not, ask the user to provide the local path for the project, then update `project_repo_path.json` with this new mapping.
+
+                    2. **Move to the repository directory:**
+                    - Use the command: `cd "<repo path>"` to change to the repository directory.
+
+                    3. **Check and summarize changes:**
+                    - Use git commands to check for change(git -P diff) and Summarize the changes as a commit detail message.
+
+                    4. **Commit the changes:**
+                    - Use the supplied `commit_title` as the commit message title, and the summarized details as the commit body.
+                    - Run the appropriate git commands to add, commit, and (optionally) push the changes.
+
+                    **If the project repo path does not exist in `project_repo_path.json`, always prompt the user for the path and update the mapping.**
+
+                    **Example interaction:**
+                    - User: commit-plan project_name="MyApp" commit_title="Fix login bug"
+                    - Model: Looks up `MyApp` in `project_repo_path.json`. If not found, asks: "Please provide the local path for project 'MyApp'."
+                    - Once path is provided, updates the mapping, changes directory, checks changes, summarizes, and commits as described above.
+
+                    ###
+                    User : 
+                    project_name : {{project_name}}
+                    commit_title : {{commit_title}}
+                    '''
+    return commit_plan.format(project_name=project_name, commit_title=commit_title)
+
+# mcp server entry point
 async def ser(repository: Path | None) -> None:
     '''
     Run the MCP server
@@ -64,9 +105,14 @@ async def ser(repository: Path | None) -> None:
         """
         return [
             Tool(
-                name=GitTools.CHECKOUT,
-                description="Create a new git branch with the specified task type, code, and title",
-                inputSchema=Git_NewBranch.model_json_schema(),
+                name=WorkflowTools.GET_COMMIT_TITLE,
+                description="Get the commit title for the specified task.",
+                inputSchema=Get_Commit_Title.model_json_schema(),
+            ),
+            Tool(
+                name=WorkflowTools.COMMIT_PLAN,
+                description="Commit plan that can follow the steps to commit changes to a local repository",
+                inputSchema=Commit_Plan.model_json_schema(),
             ),
         ]
     
@@ -78,8 +124,10 @@ async def ser(repository: Path | None) -> None:
 
         repo = git.Repo(argument["repo_path"])
 
-        if(tool_name == GitTools.CHECKOUT):
-            return TextContent(checkout(repo , argument["task_type"], argument["type_code"], argument["task_title"]))
+        if(tool_name == WorkflowTools.GET_COMMIT_TITLE):
+            return TextContent(get_commit_title(argument["task_type"], argument["type_code"], argument["task_title"]))
+        if(tool_name == WorkflowTools.COMMIT_PLAN):
+            return TextContent(commit_plan(argument["commit_title"], argument["project_name"]))
 
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):
