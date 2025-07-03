@@ -8,6 +8,7 @@ from mcp.types import (
     Tool,
 )
 import git
+import subprocess
 from pydantic import BaseModel, Field
 
 class Get_Commit_Title(BaseModel):
@@ -25,22 +26,23 @@ class Commit_Plan(BaseModel):
     project_name: str = Field(..., description="Name of the project")
     commit_title: str = Field(..., description="Title for the commit")
 
+class WebApp_Deploy(BaseModel):
+    """
+    Model to deploys a provided artifact to Azure Web Apps.
+    """
+    resource_group: str = Field(..., description="Name of the resource group")
+    name: str = Field(..., description="Name of the webapp to deploy to")
+    slot_name: str = Field(..., description="The name of the slot")
+    src_path: str = Field(..., description="Path of the artifact to be deployed")
+    subscription: str = Field(..., description="Subscription for the Azure account")
+    target_path: str = Field(..., description="Absolute path that the artifact should be deployed to")
+    type: str = Field(..., description="Type of the deployment artifact")
+    restart: bool = Field(False, description="Whether to restart the webapp after deployment")
+
 class WorkflowTools(str, Enum):
-    STATUS = "git_status"
-    DIFF_UNSTAGED = "git_diff_unstaged"
-    DIFF_STAGED = "git_diff_staged"
-    DIFF = "git_diff"
-    COMMIT = "git_commit"
-    ADD = "git_add"
-    RESET = "git_reset"
-    LOG = "git_log"
-    CREATE_BRANCH = "git_create_branch"
-    CHECKOUT = "git_checkout"
-    SHOW = "git_show"
-    INIT = "git_init"
-    BRANCH = "git_branch"
     COMMIT_PLAN = "commit_plan"
     GET_COMMIT_TITLE = "get_commit_title"
+    WEBAPP_DEPLOY = "webapp_deploy"
 
 # Get the commit title for the specified task
 def get_commit_title(task_type : str , task_code : str ,task_title : str ) -> str:
@@ -95,6 +97,27 @@ def commit_plan(commit_title : str , project_name : str) -> str:
                     '''
     return commit_plan.format(project_name=project_name, commit_title=commit_title)
 
+# Model to deploys a provided artifact to Azure Web Apps.
+def webapp_deploy(resource_group: str, name: str, slot_name: str, src_path: str, subscription: str, target_path: str, type: str, restart: bool) -> str:
+    """
+    Model to deploys a provided artifact to Azure Web Apps.
+    """
+    command = [
+        "az", "webapp", "deploy",
+        "--resource-group", resource_group,
+        "--name", name,
+        "--slot-name", slot_name,
+        "--src-path", src_path,
+        "--subscription", subscription,
+        "--target-path", target_path,
+        "--type", type,
+        "--restart", str(restart).lower()
+    ]
+
+    result = subprocess.run(command, capture_output=True, text=True)
+
+    return result.stdout if result.returncode == 0 else result.stderr
+
 # mcp server entry point
 async def ser(repository: Path | None) -> None:
     '''
@@ -119,6 +142,11 @@ async def ser(repository: Path | None) -> None:
                 description="Commit plan that can follow the steps to commit changes to a local repository",
                 inputSchema=Commit_Plan.model_json_schema(),
             ),
+            Tool(
+                name=WorkflowTools.WEBAPP_DEPLOY,
+                description="Deploys a provided artifact to Azure Web Apps.",
+                inputSchema=WebApp_Deploy.model_json_schema(),
+            ),
         ]
     
     @server.call_tool()
@@ -131,6 +159,17 @@ async def ser(repository: Path | None) -> None:
             return [TextContent(type="text", text=get_commit_title(argument["task_type"], argument["task_code"], argument["task_title"]))]
         if(tool_name == WorkflowTools.COMMIT_PLAN):
             return [TextContent(type="text", text=commit_plan(argument["commit_title"], argument["project_name"]))]
+        if(tool_name == WorkflowTools.WEBAPP_DEPLOY):
+            return [TextContent(type="text", text=webapp_deploy(
+                resource_group=argument["resource_group"],
+                name=argument["name"],
+                slot_name=argument["slot_name"],
+                src_path=argument["src_path"],
+                subscription=argument["subscription"],
+                target_path=argument["target_path"],
+                type=argument["type"],
+                restart=argument["restart"]
+            ))]
 
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):
