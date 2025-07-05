@@ -1,6 +1,8 @@
 # server.py
 import asyncio
 from enum import Enum
+import json
+import os
 from zipfile import Path
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -10,6 +12,7 @@ from mcp.types import (
 )
 import git
 import subprocess
+import logging
 from pydantic import BaseModel, Field
 
 class Get_Commit_Title(BaseModel):
@@ -147,18 +150,60 @@ def webapp_deploy(resource_group: str, name: str, src_path: str, subscription: s
 
     return result.stdout if result.returncode == 0 else result.stderr
 
-def code_publish(code_path: str, publish_destinationpath: str , version : str) -> str:
+def code_publish(code_path: str, publish_destinationpath: str, version: str) -> str:
     """
-    Publish the code to the specified project repository.
+    發佈程式碼至指定的專案儲存庫。
+    (此為包含 cwd 和手動設定 env 的最終版本)
     """
+    # 建立平台無關的輸出路徑
+    output_path = os.path.join(publish_destinationpath, version)
+
     command = [
         "dotnet", 
         "publish", code_path,
         "-c", "Release", 
-        "-o", f"{publish_destinationpath}\{version}",
+        "-o", output_path,
     ]
 
-    return subprocess.run(command, capture_output=True, text=True, shell=True)
+    # 取得 .csproj 檔案所在的目錄作為工作目錄
+    project_directory = os.path.dirname(code_path)
+    
+    # 💡 關鍵修復：複製當前不完整的環境變數，並手動補上缺失的關鍵變數
+    process_env = os.environ.copy()
+    
+    # ▼▼▼ 請將您在步驟 1 中找到的路徑填寫在這裡 ▼▼▼
+    msbuild_sdk_path = r"C:\Program Files\dotnet\sdk\9.0.301\Sdks" # <--- 請修改此行！使用 r"..." 原始字串格式以避免反斜線問題
+    
+    process_env["MSBuildSDKsPath"] = msbuild_sdk_path
+    
+    # 有些情況下可能也需要 DOTNET_ROOT
+    process_env["DOTNET_ROOT"] = r"C:\Program Files\dotnet"
+
+    try:
+        # 執行 subprocess，同時傳入正確的 cwd 和補全後的 env
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            cwd=project_directory, # 指定正確的工作目錄
+            env=process_env,       # 傳遞補全後的環境變數
+            check=False
+        )
+
+        if result.returncode == 0:
+            return f"Successfully published to {output_path}.\nOutput:\n{result.stdout}"
+        else:
+            error_message = f"Failed to publish with exit code {result.returncode}.\n"
+            if result.stdout:
+                error_message += f"--- STDOUT ---\n{result.stdout}\n"
+            if result.stderr:
+                error_message += f"--- STDERR ---\n{result.stderr}\n"
+            return error_message
+
+    except Exception as e:
+        return f"An unexpected error occurred: {str(e)}"
+
 
 def compress_code(publish_destinationpath: str, version: str) -> str:
     """
@@ -183,7 +228,7 @@ async def ser(repository: Path | None) -> None:
     Run the MCP server
     
     '''
-    server = Server("Specific workflow server")
+    server = Server("workflow")
 
     @server.list_tools()
     async def tool_list() -> list[Tool]:
