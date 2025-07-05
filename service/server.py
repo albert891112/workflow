@@ -49,12 +49,20 @@ class Code_Publish(BaseModel):
     publish_destinationpath: str = Field(..., description="Destination path for the published code")
     version: str = Field(..., description="Version of the code being published")
 
+class Compress_Code(BaseModel):
+    """
+    Model to compress the code to the specified project repository.
+    """
+    publish_destinationpath: str = Field(..., description="Destination path for the published code")
+    version: str = Field(..., description="Version of the code being published")
+
 
 class WorkflowTools(str, Enum):
     COMMIT_PLAN = "commit_plan"
     GET_COMMIT_TITLE = "get_commit_title"
     WEBAPP_DEPLOY = "webapp_deploy"
     CODE_PUBLISH = "code_publish"
+    COMPRESS_CODE = "compress_code"
 
 # Get the commit title for the specified task
 def get_commit_title(task_type : str , task_code : str ,task_title : str ) -> str:
@@ -235,6 +243,13 @@ async def ser(repository: Path | None) -> None:
         if(tool_name == WorkflowTools.CODE_PUBLISH):
             res = code_publish(
                 code_path=argument["code_path"],
+                publish_destinationpath=argument["publish_destinationpath"],
+                version=argument["version"]
+            )
+            return [TextContent(type="text", text=res)]
+        
+        if(tool_name == WorkflowTools.COMPRESS_CODE):
+            res = compress_code(
                 publish_destinationpath=argument["publish_destinationpath"],
                 version=argument["version"]
             )
